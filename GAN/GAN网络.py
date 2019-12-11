@@ -1,10 +1,12 @@
 from tensorflow.keras import layers, models
 from tensorflow.keras.datasets import mnist
+from tensorflow.keras.preprocessing import image
 
 latent_dim = 32
 height = 32
 width = 32
 channels = 3
+save_dir = 'pics'
 
 # 构建生成器
 generator_input = layers.Input(shape=(latent_dim,))
@@ -65,36 +67,46 @@ gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
 train_data = train_data.reshape((-1, 28, 28, 1))
 trian_data = train_data.astype('float32') / 255.
 
-# 训练生成
+# 制造样本标签
 valid = np.ones((128, 1))
 fake = np.zeros((128, 1))
 
+# 训练生成
 for epoch in range(20):
+    # 拆分样本
+    '''
+    从数据集随机挑选128个数据，作为一个批次训练。定义batch_size
+    得到的结果是(128, 28, 28, 1)，其实是将样本分解为batch_size
+    '''
     idx = np.random.randint(0, train_data.shape[0], 128)
-    # 从数据集随机挑选128个数据，作为一个批次训练。定义batch_size
     imgs = train_data[idx]
-    # 噪音维度(batch_size, 100)
+
+    # 制造噪音
+    '''
+    噪音维度(batch_size, 100)，并以此生成图像
+    我不理解为什么必须要用正态分布的随机向量生成图像
+    '''
     noise = np.random.normal(0, 1, (128, 100))
-    # 由生成器根据噪音生成假图的图片
     gen_img = genenrator.predict(noise)
 
     # 训练判别器，判别器希望真实图片打上标签1，假图打上0
     d_loss_real = discriminator.train_on_batch(imgs, valid)
     d_loss_fake = discriminator.train_on_batch(gen_img, fake)
+
+    # 混合真假结果
     d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
     # 训练生成器
-    noise = np.random.normal(0, 1, (128, 100))
-
     g_loss = gan.train_on_batch(noise, valid)
 
     print("%d [D loss: %f, acc.: %.2f%%] [G loss: %f]" %(epoch, d_loss[0], 100*d_loss[1], g_loss))
 
     # 每5个epoch保存一个生成图片
     if epoch % 5 == 0:
-        gan.save_weights('gan.h5')
+        gan.save_weights('gan.h5')  # 为什么要保存权重
+
         img = image.array_to_img(gen_img[0] * 255., scale=False)
-        img.save(os.path.join(save_dir, 'generated_frog' + str(epoch) + '.png'))
+        img.save(os.path.join(save_dir, 'generated_num' + str(epoch) + '.png'))
 
         img = image.array_to_img(imgs[0] *255., scale=False)
-        img.save(os.path.join(save_dir, 'real_frog' + str(epoch) + '.png'))
+        img.save(os.path.join(save_dir, 'real_num' + str(epoch) + '.png'))
