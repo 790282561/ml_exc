@@ -1,94 +1,121 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.stats import norm
-
-from tensorflow.keras.layers import Input, Dense, Lambda
-from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 from tensorflow.keras.datasets import mnist
+from tensorflow.keras.layers import Input, Dense, Lambda
+from tensorflow.keras.models import Model
 
-batch_size = 100
-original_dim = 784  # 28*28图像
-latent_dim = 2  # 隐变量均值和标准差
-intermediate_dim = 256
-epochs = 50
 
-# 加载mnist数据集
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
-x_train = x_train.astype('float32') / 255.
-x_test = x_test.astype('float32') / 255.
-x_train = x_train.reshape((-1, 784))
-x_test = x_test.reshape((-1, 784))
+class VAE():
+    def __init__(self):
+        self.batch_size = 100
+        self.original_dim = 784  # 28*28图像
+        self.latent_dim = 2  # 隐变量均值和标准差
+        self.intermediate_dim = 256
+        self.epochs = 50
 
-x = Input(shape=(original_dim,))
-h = Dense(intermediate_dim, activation='relu')(x)
-z_mean = Dense(latent_dim)(h)
-z_log_var = Dense(latent_dim)(h)
+        self.x = Input(shape=(self.original_dim,))
+        self.x_train = self.load_data()[0]
+        self.x_test = self.load_data()[1]
+        self.y_train = self.load_data()[2]
+        self.y_test = self.load_data()[3]
 
-# 重参数技巧
-def sampling(args):
-    z_mean, z_log_var = args
-    epsilon = K.random_normal(shape=K.shape(z_mean))  # epsilon为随机参数，但符合正态分布
-    return z_mean + K.exp(z_log_var / 2) * epsilon  # 把均值和标准差整合,exp是e为底的指数函数
+        self.arguments = self.encoder_build()
+        self.z_mean = self.arguments[0]
+        self.z_log_var = self.arguments[1]
 
-# 重参数层，相当于给输入加入噪声
-z = Lambda(sampling, output_shape=(latent_dim,))([z_mean, z_log_var])
+        # self.sampling = self.sampling()
+        # 中间z部分的正态数据转换
+        self.z = Lambda(self.sampling, output_shape=(self.latent_dim,))(self.arguments)
 
-# 生成器decoder
-decoder_h = Dense(intermediate_dim, activation='relu')
-decoder_mean = Dense(original_dim, activation='sigmoid')
-h_decoded = decoder_h(z)
-x_decoded_mean = decoder_mean(h_decoded)
+        self.x_decoded_mean = self.decoder_build(self.z)
 
-vae = Model(x, x_decoded_mean)
+        self.vae = Model(self.x, self.x_decoded_mean)
+        self.vae_loss = self.vae_loss_define()
 
-# xent_loss是重构loss，kl_loss是KL loss
-xent_loss = K.sum(K.binary_crossentropy(x, x_decoded_mean), axis=-1)
-kl_loss = -0.5 * K.sum(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
-vae_loss = K.mean(xent_loss + kl_loss)
+    # 加载mnist数据集
+    def load_data(self):
+        (x_train, y_train), (x_test, y_test) = mnist.load_data()
+        x_train = x_train.astype('float32') / 255.
+        x_test = x_test.astype('float32') / 255.
+        x_train = x_train.reshape((-1, 784))
+        x_test = x_test.reshape((-1, 784))
+        return (x_train, x_test, y_train, y_test)
 
-# add_loss新增方法，用于添加自定义loss
-vae.add_loss(vae_loss)
-vae.compile(optimizer='adam')
-vae.summary()
+    def encoder_build(self):
+        h = Dense(self.intermediate_dim, activation='relu')(self.x)
+        z_mean = Dense(self.latent_dim)(h)
+        z_log_var = Dense(self.latent_dim)(h)
+        return (z_mean, z_log_var)
 
-vae.fit(x_train,
-        shuffle=True,
-        epochs=epochs,
-        batch_size=batch_size,
-        validation_data=(x_test, None))
+    # 用于参考采样的正态分布
+    def sampling(self, args):
+        z_mean, z_log_var = args
+        epsilon = K.random_normal(shape=K.shape(z_mean))  # epsilon为随机参数，但符合正态分布
+        return z_mean + K.exp(z_log_var / 2) * epsilon  # 把均值和标准差整合,exp是e为底的指数函数
 
-# 构建encoder
-encoder = Model(x, z_mean)
-x_test_encoded = encoder.predict(x_test, batch_size=batch_size)
-plt.figure(figsize=(6, 6))
-plt.scatter(x_test_encoded[:, 0], x_test_encoded[:, 1], c=y_test)
-plt.colorbar()  # 颜色渐变
-plt.show()
+    # 生成器encoder
+    def decoder_build(self, args):
+        decoder_h = Dense(self.intermediate_dim, activation='relu')
+        decoder_mean = Dense(self.original_dim, activation='sigmoid')
+        h_decoded = decoder_h(args)
+        x_decoded_mean = decoder_mean(h_decoded)
+        return x_decoded_mean
 
-# 构建生成器
-decoder_input = Input(shape=(latent_dim,))
-_h_decoded = decoder_h(decoder_input)
-_x_decoded_mean = decoder_mean(_h_decoded)
-generator = Model(decoder_input, _x_decoded_mean)
+    # xent_loss是重构loss，kl_loss是KL loss
+    def vae_loss_define(self):
+        xent_loss = K.sum(K.binary_crossentropy(self.x, self.x_decoded_mean), axis=-1)
+        kl_loss = -0.5 * K.sum(1 + self.z_log_var - K.square(self.z_mean) - K.exp(self.z_log_var), axis=-1)
+        vae_loss = K.mean(xent_loss + kl_loss)
+        return vae_loss
 
-# 观察隐变量的两个维度变化是如何影响输出的
-n = 15
-digit_size = 28
-figure = np.zeros((digit_size * n, digit_size * n))
+    # add_loss新增方法，用于添加自定义loss
+    def train(self):
+        self.vae.add_loss(self.vae_loss)
+        self.vae.compile(optimizer='adam')
+        self.vae.summary()
+        self.vae.fit(self.x_train,
+                     shuffle=True,  # 打乱随机输入样本的顺序
+                     epochs=self.epochs,
+                     batch_size=self.batch_size,
+                     validation_data=(self.x_test, None))
 
-# 用正态分布的分位数来构建隐变量对
-grid_x = norm.ppf(np.linspace(0.05, 0.95, n))
-grid_y = norm.ppf(np.linspace(0.05, 0.95, n))
 
-for i ,yi in enumerate(grid_x):
-    for j, yj in enumerate(grid_y):
-        z_sample = np.array([[xi, yi]])
-        x_decoded = generator.predict(z_sample)
-        digit = x_decoded[0].reshape(digit_size, digit_size)
-        figure[i * digit_size: (i + 1) * digit_size,
-        j * digit_size: (j + 1) * digit_size] = digit
+if __name__ == '__main__':
+    vae = VAE()
+    vae.train()
 
-plt.figure(figsize=(10, 10))
-plt.imshow(figure, camp=('Greys_r'))
-plt.show()
+    # 拆分encoder，并可视化观察数据变化
+    encoder = Model(vae.x, vae.z_mean)
+    x_test_encoded = encoder.predict(vae.x_test, batch_size=vae.batch_size)
+    plt.figure(figsize=(6, 6))
+    plt.scatter(x_test_encoded[:, 0], x_test_encoded[:, 1], c=vae.y_test)
+    plt.colorbar()  # 颜色渐变
+    plt.show()
+
+    # 拆分decoder，并可视化观察数据变化
+    decoder_input = Input(shape=(vae.latent_dim,))
+    _x_decoded_mean = vae.decoder_build(decoder_input)
+    generator = Model(decoder_input, _x_decoded_mean)
+
+    # 观察隐变量的两个维度变化是如何影响输出的
+    n = 15
+    digit_size = 28
+    figure = np.zeros((digit_size * n, digit_size * n))
+
+    # 用正态分布的分位数来构建隐变量对
+    grid_x = norm.ppf(np.linspace(0.05, 0.95, n))
+    grid_y = norm.ppf(np.linspace(0.05, 0.95, n))
+
+    for i, yi in enumerate(grid_x):
+        for j, xi in enumerate(grid_y):
+            z_sample = np.array([[xi, yi]])
+            x_decoded = generator.predict(z_sample)
+            digit = x_decoded[0].reshape(digit_size, digit_size)
+            figure[i * digit_size: (i + 1) * digit_size,
+            j * digit_size: (j + 1) * digit_size] = digit
+
+    plt.figure(figsize=(10, 10))
+    plt.imshow(figure, cmap=('Greys_r'))
+    plt.show()
