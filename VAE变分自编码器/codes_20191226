@@ -73,7 +73,7 @@ class VAE():
     # add_loss新增方法，用于添加自定义loss
     def train(self):
         self.vae.add_loss(self.vae_loss)
-        self.vae.compile(optimizer='adam')
+        self.vae.compile(optimizer='rmsprop')
         self.vae.summary()
         self.vae.fit(self.x_train,
                      shuffle=True,  # 打乱随机输入样本的顺序
@@ -96,8 +96,8 @@ if __name__ == '__main__':
 
     # 拆分decoder，并可视化观察数据变化
     decoder_input = Input(shape=(vae.latent_dim,))
-    _x_decoded_mean = vae.decoder_build(decoder_input)
-    generator = Model(decoder_input, _x_decoded_mean)
+    decoder_x_decoded_mean = vae.decoder_build(decoder_input)
+    generator = Model(decoder_input, decoder_x_decoded_mean)
 
     # 观察隐变量的两个维度变化是如何影响输出的
     n = 15
@@ -113,8 +113,7 @@ if __name__ == '__main__':
             z_sample = np.array([[xi, yi]])
             x_decoded = generator.predict(z_sample)
             digit = x_decoded[0].reshape(digit_size, digit_size)
-            figure[i * digit_size: (i + 1) * digit_size,
-            j * digit_size: (j + 1) * digit_size] = digit
+            figure[i * digit_size: (i + 1) * digit_size, j * digit_size: (j + 1) * digit_size] = digit
 
     plt.figure(figsize=(10, 10))
     plt.imshow(figure, cmap=('Greys_r'))
